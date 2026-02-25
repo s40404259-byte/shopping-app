@@ -18,6 +18,7 @@ const { ReturnService } = require('../domains/returns/service');
 const { NotificationService } = require('../domains/notifications/service');
 const { CheckoutService } = require('../domains/checkout/service');
 const { AdminService } = require('../domains/admin/service');
+const { ShippingService } = require('../domains/shipping/service');
 
 function createContext() {
   const eventBus = new EventBus();
@@ -39,6 +40,7 @@ function createContext() {
   const returnService = new ReturnService(orderService);
   const notificationService = new NotificationService();
   const adminService = new AdminService({ catalogService, sellerService, orderService });
+  const shippingService = new ShippingService();
 
   const checkoutService = new CheckoutService({
     cartService,
@@ -72,6 +74,7 @@ function createContext() {
     notificationService,
     checkoutService,
     adminService,
+    shippingService,
   };
 }
 

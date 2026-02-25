@@ -146,3 +146,31 @@ test('admin + seller + customer flow with real-time stock enforcement', async ()
   response = await fetch(`${baseUrl}/api/shipments/${orderId}`);
   assert.equal(response.status, 200);
 });
+
+
+test('shipping quote and profile address flow work', async () => {
+  let response = await fetch(`${baseUrl}/api/auth/register`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ email: 'shipuser@example.com', password: 'secret' }),
+  });
+  const user = await response.json();
+  assert.equal(response.status, 201);
+
+  response = await fetch(`${baseUrl}/api/profile/${user.id}/addresses`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      addressLine: 'MG Road', city: 'Bengaluru', state: 'KA', pincode: '560001', latitude: 12.97, longitude: 77.59,
+    }),
+  });
+  assert.equal(response.status, 201);
+
+  response = await fetch(`${baseUrl}/api/shipping/quote`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ lat: 12.97, lng: 77.59, itemsCount: 2, subtotal: 900 }),
+  });
+  assert.equal(response.status, 200);
+  const quote = await response.json();
+  assert.ok(quote.totalShipping > 0);
+  assert.ok(quote.etaMinutes >= 20);
+  assert.ok(quote.distanceKm >= 0);
+});

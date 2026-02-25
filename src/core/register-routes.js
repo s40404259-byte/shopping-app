@@ -8,6 +8,7 @@ const { registerSellerRoutes } = require('../modules/seller/routes');
 const { registerCheckoutRoutes } = require('../modules/checkout/routes');
 const { registerFulfillmentRoutes } = require('../modules/fulfillment/routes');
 const { registerAdminRoutes } = require('../modules/admin/routes');
+const { registerShippingRoutes } = require('../modules/shipping/routes');
 
 function registerRoutes(router, ctx) {
   registerAuthRoutes(router, ctx);
@@ -20,6 +21,7 @@ function registerRoutes(router, ctx) {
   registerCheckoutRoutes(router, ctx);
   registerFulfillmentRoutes(router, ctx);
   registerAdminRoutes(router, ctx);
+  registerShippingRoutes(router, ctx);
 }
 
 module.exports = { registerRoutes };
