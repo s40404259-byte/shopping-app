@@ -5,7 +5,7 @@ class CatalogService {
     this.products = new Map();
   }
 
-  createProduct({ sku, name, price, stock = 0, sellerId, description = '', category = 'general', brand = '' }) {
+  createProduct({ sku, name, price, stock = 0, sellerId, description = '', category = 'general', brand = '', images = [], reviews = [] }) {
     if (!sku || !name || typeof price !== 'number') {
       throw new HttpError(400, 'sku, name and numeric price are required');
     }
@@ -16,6 +16,10 @@ class CatalogService {
       throw new HttpError(409, 'product already exists');
     }
 
+    const normalizedImages = Array.isArray(images) && images.length
+      ? images.slice(0, 4)
+      : this.#placeholderImages(sku);
+
     const product = {
       sku,
       name,
@@ -25,6 +29,8 @@ class CatalogService {
       sellerId,
       price,
       stock,
+      images: normalizedImages,
+      reviews: Array.isArray(reviews) ? reviews : [],
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
@@ -41,6 +47,8 @@ class CatalogService {
       category: updates.category ?? product.category,
       brand: updates.brand ?? product.brand,
       price: typeof updates.price === 'number' ? updates.price : product.price,
+      images: Array.isArray(updates.images) ? updates.images.slice(0, 4) : product.images,
+      reviews: Array.isArray(updates.reviews) ? updates.reviews : product.reviews,
       updatedAt: new Date().toISOString(),
     };
     this.products.set(sku, next);
@@ -67,6 +75,16 @@ class CatalogService {
     const product = this.products.get(sku);
     if (!product) throw new HttpError(404, 'product not found');
     return product;
+  }
+
+  #placeholderImages(sku) {
+    const seed = encodeURIComponent(sku);
+    return [
+      `https://picsum.photos/seed/${seed}-1/500/500`,
+      `https://picsum.photos/seed/${seed}-2/500/500`,
+      `https://picsum.photos/seed/${seed}-3/500/500`,
+      `https://picsum.photos/seed/${seed}-4/500/500`,
+    ];
   }
 }
 

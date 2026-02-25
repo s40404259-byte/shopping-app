@@ -26,6 +26,10 @@ class OrderService {
     return Array.from(this.orders.values());
   }
 
+  listByUser(userId) {
+    return this.list().filter((order) => order.userId === userId);
+  }
+
   sellerSummary(sellerId) {
     const sellerOrders = this.list().filter((order) =>
       order.items.some((item) => item.sellerId === sellerId)

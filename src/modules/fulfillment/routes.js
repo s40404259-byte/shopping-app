@@ -2,6 +2,7 @@ const { HttpError } = require('../../lib/http-error');
 
 function registerFulfillmentRoutes(router, ctx) {
   router.register('GET', '/api/orders', () => ({ status: 200, data: ctx.orderService.list() }));
+  router.register('GET', '/api/orders/user/:userId', ({ params }) => ({ status: 200, data: ctx.orderService.listByUser(params.userId) }));
   router.register('GET', '/api/orders/:orderId', ({ params }) => {
     const order = ctx.orderService.get(params.orderId);
     if (!order) throw new HttpError(404, 'order not found');

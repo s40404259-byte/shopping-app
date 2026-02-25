@@ -6,6 +6,11 @@ export const fetchProducts = createAsyncThunk('products/fetch', async () => {
   return data;
 });
 
+export const searchProducts = createAsyncThunk('products/search', async ({ q = '', category = '' }) => {
+  const { data } = await api.get('/api/search', { params: { q, category } });
+  return data;
+});
+
 export const createProductAdmin = createAsyncThunk('products/createAdmin', async (payload) => {
   const { data } = await api.post('/api/admin/products', payload);
   return data;
@@ -18,6 +23,9 @@ const slice = createSlice({
   extraReducers: (builder) => {
     builder
       .addCase(fetchProducts.fulfilled, (state, action) => {
+        state.items = action.payload;
+      })
+      .addCase(searchProducts.fulfilled, (state, action) => {
         state.items = action.payload;
       })
       .addCase(createProductAdmin.fulfilled, (state, action) => {
