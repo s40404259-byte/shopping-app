@@ -174,3 +174,251 @@ test('shipping quote and profile address flow work', async () => {
   assert.ok(quote.etaMinutes >= 20);
   assert.ok(quote.distanceKm >= 0);
 });
+
+test('checkout idempotency keys are scoped per user', async () => {
+  let response = await fetch(`${baseUrl}/api/sellers`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ sellerId: 'seller_2', legalName: 'Scoped Seller' }),
+  });
+  assert.equal(response.status, 201);
+
+  response = await fetch(`${baseUrl}/api/admin/products`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      sku: 'SKU-IDEMP',
+      name: 'Scoped Item',
+      description: 'Item for idempotency scoping checks',
+      category: 'electronics',
+      brand: 'Acme',
+      price: 1000,
+      stock: 5,
+      sellerId: 'seller_2',
+    }),
+  });
+  assert.equal(response.status, 201);
+
+  response = await fetch(`${baseUrl}/api/auth/register`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ email: 'idem-one@example.com', password: 'secret' }),
+  });
+  const userOne = await response.json();
+  assert.equal(response.status, 201);
+
+  response = await fetch(`${baseUrl}/api/auth/register`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ email: 'idem-two@example.com', password: 'secret' }),
+  });
+  const userTwo = await response.json();
+  assert.equal(response.status, 201);
+
+  response = await fetch(`${baseUrl}/api/cart/items`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ userId: userOne.id, sku: 'SKU-IDEMP', quantity: 1 }),
+  });
+  assert.equal(response.status, 200);
+
+  response = await fetch(`${baseUrl}/api/cart/items`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ userId: userTwo.id, sku: 'SKU-IDEMP', quantity: 1 }),
+  });
+  assert.equal(response.status, 200);
+
+  response = await fetch(`${baseUrl}/api/checkout`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ userId: userOne.id, paymentMethod: 'UPI', idempotencyKey: 'shared-idem-key' }),
+  });
+  assert.equal(response.status, 201);
+  const firstCheckout = await response.json();
+
+  response = await fetch(`${baseUrl}/api/checkout`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ userId: userTwo.id, paymentMethod: 'UPI', idempotencyKey: 'shared-idem-key' }),
+  });
+  assert.equal(response.status, 201);
+  const secondCheckout = await response.json();
+
+  assert.notEqual(firstCheckout.order.orderId, secondCheckout.order.orderId);
+  assert.equal(firstCheckout.order.userId, userOne.id);
+  assert.equal(secondCheckout.order.userId, userTwo.id);
+});
+
+
+test('checkout idempotency returns cached result for same user and payload', async () => {
+  let response = await fetch(`${baseUrl}/api/sellers`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ sellerId: 'seller_3', legalName: 'Replay Seller' }),
+  });
+  assert.equal(response.status, 201);
+
+  response = await fetch(`${baseUrl}/api/admin/products`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      sku: 'SKU-REPLAY',
+      name: 'Replay Item',
+      description: 'Item for idempotency replay checks',
+      category: 'electronics',
+      brand: 'Acme',
+      price: 2000,
+      stock: 3,
+      sellerId: 'seller_3',
+    }),
+  });
+  assert.equal(response.status, 201);
+
+  response = await fetch(`${baseUrl}/api/auth/register`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ email: 'idem-replay@example.com', password: 'secret' }),
+  });
+  const user = await response.json();
+  assert.equal(response.status, 201);
+
+  response = await fetch(`${baseUrl}/api/cart/items`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ userId: user.id, sku: 'SKU-REPLAY', quantity: 1 }),
+  });
+  assert.equal(response.status, 200);
+
+  response = await fetch(`${baseUrl}/api/checkout`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ userId: user.id, paymentMethod: 'UPI', idempotencyKey: 'user-replay-key' }),
+  });
+  assert.equal(response.status, 201);
+  const firstCheckout = await response.json();
+
+  response = await fetch(`${baseUrl}/api/checkout`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ userId: user.id, paymentMethod: 'UPI', idempotencyKey: 'user-replay-key' }),
+  });
+  assert.equal(response.status, 201);
+  const replayCheckout = await response.json();
+
+  assert.equal(replayCheckout.order.orderId, firstCheckout.order.orderId);
+  assert.equal(replayCheckout.payment.paymentId, firstCheckout.payment.paymentId);
+});
+
+test('checkout idempotency key reuse with changed payload is rejected', async () => {
+  let response = await fetch(`${baseUrl}/api/sellers`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ sellerId: 'seller_4', legalName: 'Mismatch Seller' }),
+  });
+  assert.equal(response.status, 201);
+
+  response = await fetch(`${baseUrl}/api/admin/products`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      sku: 'SKU-MISMATCH',
+      name: 'Mismatch Item',
+      description: 'Item for idempotency mismatch checks',
+      category: 'electronics',
+      brand: 'Acme',
+      price: 1500,
+      stock: 3,
+      sellerId: 'seller_4',
+    }),
+  });
+  assert.equal(response.status, 201);
+
+  response = await fetch(`${baseUrl}/api/auth/register`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ email: 'idem-mismatch@example.com', password: 'secret' }),
+  });
+  const user = await response.json();
+  assert.equal(response.status, 201);
+
+  response = await fetch(`${baseUrl}/api/cart/items`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ userId: user.id, sku: 'SKU-MISMATCH', quantity: 1 }),
+  });
+  assert.equal(response.status, 200);
+
+  response = await fetch(`${baseUrl}/api/checkout`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ userId: user.id, paymentMethod: 'UPI', idempotencyKey: 'user-mismatch-key' }),
+  });
+  assert.equal(response.status, 201);
+
+  response = await fetch(`${baseUrl}/api/checkout`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ userId: user.id, paymentMethod: 'CARD', idempotencyKey: 'user-mismatch-key' }),
+  });
+  assert.equal(response.status, 409);
+});
+
+
+test('auth supports forgot account flow with email otp', async () => {
+  let response = await fetch(`${baseUrl}/api/auth/register`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ email: 'forgot@example.com', password: 'secret' }),
+  });
+  assert.equal(response.status, 201);
+
+  response = await fetch(`${baseUrl}/api/auth/send-otp`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ email: 'forgot@example.com' }),
+  });
+  assert.equal(response.status, 200);
+
+  response = await fetch(`${baseUrl}/api/auth/login`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ email: 'forgot@example.com', otp: '123456' }),
+  });
+  assert.equal(response.status, 200);
+  const session = await response.json();
+  assert.equal(session.loginMethod, 'otp');
+  assert.equal(session.user.email, 'forgot@example.com');
+});
+
+test('order history by user and payment method validation work', async () => {
+  let response = await fetch(`${baseUrl}/api/auth/register`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ email: 'history@example.com', password: 'secret' }),
+  });
+  const user = await response.json();
+  assert.equal(response.status, 201);
+
+  response = await fetch(`${baseUrl}/api/sellers`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ sellerId: 'seller_hist', legalName: 'History Seller' }),
+  });
+  assert.equal(response.status, 201);
+
+  response = await fetch(`${baseUrl}/api/admin/products`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      sku: 'SKU-HISTORY',
+      name: 'History Product',
+      description: 'order history checks',
+      category: 'electronics',
+      brand: 'Acme',
+      price: 1200,
+      stock: 2,
+      sellerId: 'seller_hist',
+      reviews: [{ user: 'alice', rating: 5, comment: 'great' }],
+    }),
+  });
+  assert.equal(response.status, 201);
+
+  response = await fetch(`${baseUrl}/api/cart/items`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ userId: user.id, sku: 'SKU-HISTORY', quantity: 1 }),
+  });
+  assert.equal(response.status, 200);
+
+  response = await fetch(`${baseUrl}/api/checkout`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ userId: user.id, paymentMethod: 'COD', idempotencyKey: 'hist-1' }),
+  });
+  assert.equal(response.status, 201);
+
+  response = await fetch(`${baseUrl}/api/orders/user/${user.id}`);
+  assert.equal(response.status, 200);
+  const orders = await response.json();
+  assert.equal(orders.length, 1);
+  assert.equal(orders[0].userId, user.id);
+
+  response = await fetch(`${baseUrl}/api/checkout`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ userId: user.id, paymentMethod: 'BANK_TRANSFER', idempotencyKey: 'hist-2' }),
+  });
+  assert.equal(response.status, 400);
+});

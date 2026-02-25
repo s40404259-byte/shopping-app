@@ -35,11 +35,23 @@ class AuthService {
     return this.#publicUser(user);
   }
 
-  sendOtp({ phone }) {
-    if (!phone) throw new HttpError(400, 'phone is required');
+  sendOtp({ phone, email }) {
+    const channel = phone ? 'phone' : 'email';
+    const target = phone || email;
+
+    if (!target) throw new HttpError(400, 'phone or email is required');
+
+    const user = this.#findByEmailOrPhone({ email, phone });
+    if (!user) throw new HttpError(404, 'account not found');
+
     const otp = '123456';
-    this.otpStore.set(phone, otp);
-    return { phone, otpSent: true, otpHint: 'Use 123456 in this demo backend' };
+    this.otpStore.set(`${channel}:${target}`, otp);
+    return {
+      channel,
+      target,
+      otpSent: true,
+      otpHint: 'Use 123456 in this demo backend',
+    };
   }
 
   login({ email, phone, password, provider = 'password', googleEmail, otp }) {
@@ -53,10 +65,12 @@ class AuthService {
 
     const user = this.#findByEmailOrPhone({ email, phone });
 
-    if (phone && otp) {
-      const expectedOtp = this.otpStore.get(phone);
+    if (otp) {
+      const channel = phone ? 'phone' : 'email';
+      const target = phone || email;
+      const expectedOtp = this.otpStore.get(`${channel}:${target}`);
       if (!expectedOtp || expectedOtp !== otp) throw new HttpError(401, 'invalid otp');
-      this.otpStore.delete(phone);
+      this.otpStore.delete(`${channel}:${target}`);
       return this.#session(user, 'otp');
     }
 

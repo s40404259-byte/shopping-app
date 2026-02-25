@@ -11,7 +11,7 @@ class CheckoutService {
     this.logisticsService = logisticsService;
     this.notificationService = notificationService;
     this.offerService = offerService;
-    this.idempotency = new Map();
+    this.idempotencyByUser = new Map();
   }
 
   placeOrder({ userId, paymentMethod, idempotencyKey, offerCode = null, redeemCoins = 0 }) {
@@ -19,8 +19,20 @@ class CheckoutService {
       throw new HttpError(400, 'userId, paymentMethod and idempotencyKey are required');
     }
 
-    const existing = this.idempotency.get(idempotencyKey);
-    if (existing) return existing;
+    const normalizedRequest = {
+      paymentMethod,
+      offerCode: offerCode || null,
+      redeemCoins: Math.max(0, Math.floor(redeemCoins)),
+    };
+
+    const idempotencyStore = this.#getUserIdempotencyStore(userId);
+    const existing = idempotencyStore.get(idempotencyKey);
+    if (existing) {
+      if (!this.#isSameIdempotencyRequest(existing.request, normalizedRequest)) {
+        throw new HttpError(409, 'idempotency key reuse with different payload is not allowed');
+      }
+      return existing.result;
+    }
 
     const cart = this.cartService.getCart(userId);
     if (!cart.items.length) {
@@ -28,16 +40,17 @@ class CheckoutService {
     }
 
     const orderId = `ord_${Date.now()}_${Math.random().toString(16).slice(2, 8)}`;
-    const offerResult = offerCode ? this.offerService.applyOffer({ amount: cart.totalAmount, code: offerCode }) : { discount: 0, finalAmount: cart.totalAmount, code: null };
-    const redeemAmount = Math.max(0, Math.floor(redeemCoins));
+    const offerResult = offerCode
+      ? this.offerService.applyOffer({ amount: cart.totalAmount, code: offerCode })
+      : { discount: 0, finalAmount: cart.totalAmount, code: null };
 
     try {
       this.inventoryService.reserve(orderId, cart.items);
-      if (redeemAmount > 0) {
-        this.loyaltyService.redeem({ userId, coins: redeemAmount });
+      if (normalizedRequest.redeemCoins > 0) {
+        this.loyaltyService.redeem({ userId, coins: normalizedRequest.redeemCoins });
       }
 
-      const payableAmount = Math.max(0, offerResult.finalAmount - redeemAmount);
+      const payableAmount = Math.max(0, offerResult.finalAmount - normalizedRequest.redeemCoins);
       const payment = this.paymentService.authorize({
         orderId,
         amount: payableAmount,
@@ -80,13 +93,28 @@ class CheckoutService {
       this.cartService.clearCart(userId);
 
       const result = { order, payment, shipment, offer: offerResult, loyalty, notification };
-      this.idempotency.set(idempotencyKey, result);
+      idempotencyStore.set(idempotencyKey, { request: normalizedRequest, result });
       return result;
     } catch (error) {
       this.inventoryService.release(orderId);
       this.paymentService.refund(orderId);
       throw error;
     }
+  }
+
+  #getUserIdempotencyStore(userId) {
+    if (!this.idempotencyByUser.has(userId)) {
+      this.idempotencyByUser.set(userId, new Map());
+    }
+    return this.idempotencyByUser.get(userId);
+  }
+
+  #isSameIdempotencyRequest(savedRequest, incomingRequest) {
+    return (
+      savedRequest.paymentMethod === incomingRequest.paymentMethod
+      && savedRequest.offerCode === incomingRequest.offerCode
+      && savedRequest.redeemCoins === incomingRequest.redeemCoins
+    );
   }
 }
 

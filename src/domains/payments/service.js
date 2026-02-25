@@ -1,14 +1,22 @@
+const { HttpError } = require('../../lib/http-error');
+
 class PaymentService {
   constructor() {
     this.payments = new Map();
+    this.supportedMethods = new Set(['CARD', 'WALLET', 'COD', 'UPI']);
   }
 
   authorize({ orderId, amount, method }) {
+    const normalizedMethod = String(method || '').trim().toUpperCase();
+    if (!this.supportedMethods.has(normalizedMethod)) {
+      throw new HttpError(400, 'unsupported payment method; use CARD, WALLET, COD, or UPI');
+    }
+
     const payment = {
       paymentId: `pay_${this.payments.size + 1}`,
       orderId,
       amount,
-      method,
+      method: normalizedMethod,
       status: 'AUTHORIZED',
       createdAt: new Date().toISOString(),
     };

@@ -3,6 +3,7 @@ function registerDiscoveryRoutes(router, ctx) {
     status: 200,
     data: ctx.searchService.query({
       q: query.q || '',
+      category: query.category || '',
       minPrice: Number(query.minPrice || 0),
       maxPrice: Number(query.maxPrice || Number.MAX_SAFE_INTEGER),
     }),
