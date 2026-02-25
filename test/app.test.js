@@ -1,0 +1,148 @@
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const http = require('node:http');
+const { createApp } = require('../src/app');
+
+let server;
+let baseUrl;
+
+test.before(async () => {
+  const handler = createApp();
+  await new Promise((resolve) => {
+    server = http.createServer(handler).listen(0, resolve);
+  });
+  const { port } = server.address();
+  baseUrl = `http://127.0.0.1:${port}`;
+});
+
+test.after(async () => {
+  await new Promise((resolve, reject) => server.close((err) => (err ? reject(err) : resolve())));
+});
+
+test('health endpoint returns ok', async () => {
+  const response = await fetch(`${baseUrl}/health`);
+  assert.equal(response.status, 200);
+  const data = await response.json();
+  assert.equal(data.status, 'ok');
+});
+
+test('auth supports email signup/login, phone otp login, and google login', async () => {
+  let response = await fetch(`${baseUrl}/api/auth/register`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ email: 'email-user@example.com', password: 'secret' }),
+  });
+  assert.equal(response.status, 201);
+
+  response = await fetch(`${baseUrl}/api/auth/login`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ email: 'email-user@example.com', password: 'secret' }),
+  });
+  assert.equal(response.status, 200);
+  const emailLogin = await response.json();
+  assert.equal(emailLogin.loginMethod, 'password');
+
+  response = await fetch(`${baseUrl}/api/auth/register`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ phone: '9999999999', password: 'phone-secret' }),
+  });
+  assert.equal(response.status, 201);
+
+  response = await fetch(`${baseUrl}/api/auth/send-otp`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ phone: '9999999999' }),
+  });
+  assert.equal(response.status, 200);
+
+  response = await fetch(`${baseUrl}/api/auth/login`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ phone: '9999999999', otp: '123456' }),
+  });
+  assert.equal(response.status, 200);
+  const phoneLogin = await response.json();
+  assert.equal(phoneLogin.loginMethod, 'otp');
+
+  response = await fetch(`${baseUrl}/api/auth/register`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ provider: 'google', googleEmail: 'gmail-user@gmail.com' }),
+  });
+  assert.equal(response.status, 201);
+
+  response = await fetch(`${baseUrl}/api/auth/login`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ provider: 'google', googleEmail: 'gmail-user@gmail.com' }),
+  });
+  assert.equal(response.status, 200);
+  const googleLogin = await response.json();
+  assert.equal(googleLogin.loginMethod, 'google');
+});
+
+test('admin + seller + customer flow with real-time stock enforcement', async () => {
+  let response = await fetch(`${baseUrl}/api/auth/register`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ email: 'buyer@example.com', password: 'secret' }),
+  });
+  const user = await response.json();
+  assert.equal(response.status, 201);
+
+  response = await fetch(`${baseUrl}/api/sellers`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ sellerId: 'seller_1', legalName: 'Acme Retail' }),
+  });
+  assert.equal(response.status, 201);
+
+  response = await fetch(`${baseUrl}/api/admin/products`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      sku: 'SKU-100',
+      name: 'Laptop',
+      description: 'Gaming Laptop',
+      category: 'electronics',
+      brand: 'Acme',
+      price: 50000,
+      stock: 2,
+      sellerId: 'seller_1',
+    }),
+  });
+  assert.equal(response.status, 201);
+
+  response = await fetch(`${baseUrl}/api/cart/items`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ userId: user.id, sku: 'SKU-100', quantity: 3 }),
+  });
+  assert.equal(response.status, 409);
+
+  response = await fetch(`${baseUrl}/api/cart/items`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ userId: user.id, sku: 'SKU-100', quantity: 2 }),
+  });
+  assert.equal(response.status, 200);
+
+  response = await fetch(`${baseUrl}/api/checkout`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ userId: user.id, paymentMethod: 'UPI', idempotencyKey: 'idem-123', offerCode: 'BBD10' }),
+  });
+  assert.equal(response.status, 201);
+  const result = await response.json();
+  const orderId = result.order.orderId;
+
+  response = await fetch(`${baseUrl}/api/admin/out-of-stock`);
+  assert.equal(response.status, 200);
+  const outOfStock = await response.json();
+  assert.equal(outOfStock.length, 1);
+
+  response = await fetch(`${baseUrl}/api/sellers/seller_1/dashboard`);
+  assert.equal(response.status, 200);
+  const dashboard = await response.json();
+  assert.equal(dashboard.totalOrders, 1);
+  assert.equal(dashboard.soldItems, 2);
+  assert.ok(dashboard.revenue > 0);
+
+  response = await fetch(`${baseUrl}/api/admin/overview`);
+  assert.equal(response.status, 200);
+  const overview = await response.json();
+  assert.equal(overview.totalSellers, 1);
+  assert.equal(overview.totalOrders, 1);
+
+  response = await fetch(`${baseUrl}/api/shipments/${orderId}`);
+  assert.equal(response.status, 200);
+});
