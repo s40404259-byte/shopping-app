@@ -1,0 +1,12 @@
+{
+  "name": "shopping-app-backend",
+  "version": "1.0.0",
+  "description": "Node.js backend skeleton for Flipkart-like commerce platform",
+  "main": "src/server.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
+    "test": "node --test"
+  }
+}
